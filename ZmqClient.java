@@ -15,11 +15,11 @@ public class ZmqClient {
     private static final Logger logger = Logger.getLogger(ZmqClient.class.getName());
 
     public static void main(String[] args) {
-        testZmqEmbServer();
+        requestZMQ();
     }
 
-    public static void testZmqEmbServer() {
-        String frontEndpoint = "tcp://localhost:5576";
+    public static void requestZMQ() {
+        String frontEndpoint = "tcp://localhost:5566";
 
         try (ZContext context = new ZContext()) {
             ZMQ.Socket socket = context.createSocket(SocketType.REQ);
@@ -54,6 +54,7 @@ public class ZmqClient {
                     byte[] msg = socket.recv();
                     // Decode received bytes back to JSON string
                     String jsonResponse = new String(msg, ZMQ.CHARSET);
+                    logger.info(jsonResponse);
                     Type jsonType = new TypeToken<Map<String, Object>>() {}.getType();
                     Map<String, Object> response = gson.fromJson(jsonResponse, jsonType);
                     String preds = (String) response.get("predict");

@@ -1,16 +1,16 @@
-import os
 import json
 import logging
-import uuid
 import threading
+import uuid
+import argparse
 import zmq
+
 
 # Define the desired date format
 date_format = "%b %d, %Y %I:%M:%S %p"
 
-# Define the log message format including script name and a newline character
-script_name = os.path.basename(__file__)
-log_format = f"%(asctime)s {script_name}\n%(levelname)s: %(message)s"
+# Define the log message format including time and script name
+log_format = f"%(asctime)s Titan TBrane Server\n%(levelname)s: %(message)s"
 
 # Configure the logging module with the formats
 logging.basicConfig(level=logging.INFO, format=log_format, datefmt=date_format)
@@ -18,23 +18,35 @@ logging.basicConfig(level=logging.INFO, format=log_format, datefmt=date_format)
 logger = logging.getLogger(__name__)
 
 
+def is_valid_uuid(ticket):
+    try:
+        txt = ticket.decode("utf-8", "ignore")
+        uuid.UUID(txt)
+        return True
+    except ValueError:
+        return False
+
+
 class Server(threading.Thread):
-    def __init__(self):
-        self._stop = threading.Event()
+    def __init__(self, ip="127.0.0.1", port=5566):
+        self.event = threading.Event()
+        self.port = port
+        self.ip = ip
         threading.Thread.__init__(self)
 
     def stop(self):
-        self._stop.set()
+        self.event.set()
 
     def stopped(self):
-        return self._stop.is_set()
+        return self.event.is_set()
 
     def run(self):
         context = zmq.Context()
         frontend = context.socket(zmq.ROUTER)
         # frontend will communicate with client through tcp protocol
-        frontend.bind("tcp://*:5576")
+        frontend.bind(f"tcp://{self.ip}:{self.port}")
 
+        # backend and frontend work internally
         backend = context.socket(zmq.DEALER)
         backend.bind("inproc://tbrane_endpoint")
 
@@ -47,19 +59,17 @@ class Server(threading.Thread):
             if frontend in sockets:
                 if sockets[frontend] == zmq.POLLIN:
                     ticket, _, msg = frontend.recv_multipart()
-                    logger.info(f"Receiving a request from << {ticket.decode()}")
+                    logger.info(f"Receiving a request from << {ticket}")
 
-                    # Decode the JSON message
-                    json_msg = json.loads(msg.decode("utf-8"))
-
-                    handler = RequestHandler(context, ticket, json_msg)
+                    handler = RequestHandler(context, ticket, msg)
                     handler.start()
 
             if backend in sockets:
+                # backend received result from worker and now transfers to frontend
                 if sockets[backend] == zmq.POLLIN:
                     ticket = backend.recv()
                     msg = backend.recv()
-                    logger.info(f"Sending message back to >> {ticket.decode()}")
+                    logger.info(f"Sending message back to >> {ticket}")
                     frontend.send_multipart([ticket, b"", msg])
 
         frontend.close()
@@ -76,16 +86,19 @@ class RequestHandler(threading.Thread):
 
     def process(self):
         # Process the JSON message received
-        payload = self.msg.get("payload", "")
-        response = {"predict": "Processed " + payload}
+        # Decode the JSON message
+        if is_valid_uuid(self.ticket):
+            json_msg = json.loads(self.msg.decode("utf-8"))
+            payload = json_msg.get("payload", "")
+            return {"predict": "Processed " + payload}
 
-        return response
+        return {"error": "Invalid ticket! Are you alien?"}
 
     def run(self):
         # Simulate a long-running operation
         output = self.process()
 
-        # Worker will send the reply back to the DEALER backend socket via inproc
+        # Worker is a middle man, it sends result to backend pool
         worker = self.context.socket(zmq.DEALER)
         worker.connect("inproc://tbrane_endpoint")
 
@@ -95,9 +108,10 @@ class RequestHandler(threading.Thread):
         worker.close()
 
 
-def main():
+def main(port=5566):
     # Start the server that will handle incoming requests
-    server = Server()
+    logger.info(f"The server starting at port: {port}")
+    server = Server(port=port)
     try:
         server.start()
     except KeyboardInterrupt:
@@ -108,4 +122,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="TBrane Server")
+    parser.add_argument(
+        "--port",
+        type=int,
+        required=False,
+        default=5566,
+        help="Port number to bind the server to",
+    )
+    args = parser.parse_args()
+
+    main(port=args.port)

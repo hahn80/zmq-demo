@@ -1,15 +1,14 @@
-import os
 import json
 import logging
 import uuid
+import argparse
 import zmq
 
 # Define the desired date format
 date_format = "%b %d, %Y %I:%M:%S %p"
 
-# Define the log message format including script name and a newline character
-script_name = os.path.basename(__file__)
-log_format = f"%(asctime)s {script_name}\n%(levelname)s: %(message)s"
+# Define the log message format including time and script name
+log_format = f"%(asctime)s Titan TBrane Client\n%(levelname)s: %(message)s"
 
 # Configure the logging module with the formats
 logging.basicConfig(level=logging.INFO, format=log_format, datefmt=date_format)
@@ -17,8 +16,8 @@ logging.basicConfig(level=logging.INFO, format=log_format, datefmt=date_format)
 logger = logging.getLogger(__name__)
 
 
-def request_zmq():
-    front_endpoint = "tcp://localhost:5576"
+def request_zmq(port=5566):
+    front_endpoint = f"tcp://localhost:{port}"
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
 
@@ -48,7 +47,8 @@ def request_zmq():
             # Decode received bytes back to JSON string
             json_response = msg.decode("utf-8")
             response = json.loads(json_response)
-            preds = response["predict"]
+            logger.info(response)
+            preds = response.get("predict")
             logger.info(preds)
             break  # Exit the loop once a reply is received
 
@@ -58,4 +58,13 @@ def request_zmq():
 
 
 if __name__ == "__main__":
-    request_zmq()
+    parser = argparse.ArgumentParser(description="TBrane Server")
+    parser.add_argument(
+        "--port",
+        type=int,
+        required=False,
+        default=5566,
+        help="Port number to bind the server to",
+    )
+    args = parser.parse_args()
+    request_zmq(port=args.port)
